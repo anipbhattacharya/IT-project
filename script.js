@@ -408,14 +408,41 @@ function escapeHtml(value) {
 }
 
 
+/* Safely resolve image paths so nested routes like /heritage/... do not 404 */
+
+function resolveImagePath(imageUrl) {
+    if (!imageUrl) {
+        return "";
+    }
+
+    if (
+        imageUrl.startsWith("http://") ||
+        imageUrl.startsWith("https://") ||
+        imageUrl.startsWith("data:")
+    ) {
+        return imageUrl;
+    }
+
+    /* When served via HTTP/HTTPS, root the image path from origin */
+    if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+        const cleanPath = imageUrl.replace(/^\.?\/?/, "");
+        return "/" + encodeURI(cleanPath);
+    }
+
+    /* When loaded via file:// protocol directly */
+    return encodeURI(imageUrl);
+}
+
+
 /* Create an image or a blank placeholder. */
 
 function imageSlot(label, imageUrl = "", extraClass = "") {
     if (imageUrl) {
+        const resolved = resolveImagePath(imageUrl);
         return `
             <img
                 class="real-image ${extraClass}"
-                src="${escapeHtml(imageUrl)}"
+                src="${escapeHtml(resolved)}"
                 alt="${escapeHtml(label)}"
                 loading="lazy"
             >
@@ -1211,17 +1238,18 @@ function galleryPage() {
    ===================================================== */
 
 function normalizePath(path) {
-    if (!path || path === "/" || path === "") {
+    if (!path || path === "/" || path === "" || path === "#" || path === "#/") {
         return "/";
     }
 
-    return path.replace(/\/+$/, "");
+    let cleaned = path.replace(/^#\/?/, "/");
+    cleaned = cleaned.replace(/\/+$/, "");
+    return cleaned.startsWith("/") ? cleaned : "/" + cleaned;
 }
 
 function getCurrentPath() {
-    if (window.location.protocol === "file:" || !window.location.origin || window.location.origin === "null") {
-        const hashPath = window.location.hash.replace(/^#/, "");
-        return normalizePath(hashPath || "/");
+    if (window.location.hash) {
+        return normalizePath(window.location.hash);
     }
 
     const path = normalizePath(window.location.pathname);
@@ -1230,8 +1258,7 @@ function getCurrentPath() {
     }
 
     if (path.endsWith("/index.html") || path.endsWith("\\index.html")) {
-        const hashPath = window.location.hash.replace(/^#/, "");
-        return normalizePath(hashPath || "/");
+        return "/";
     }
 
     return path;
@@ -1382,16 +1409,15 @@ document.addEventListener("click", function (event) {
 
     event.preventDefault();
 
-    if (window.location.protocol === "file:" || !window.location.origin || window.location.origin === "null") {
-        window.location.hash = href;
-    } else {
-        try {
-            history.pushState({}, "", href);
-            render();
-        } catch (err) {
-            window.location.hash = href;
-            render();
+    const targetRoute = normalizePath(href);
+    if (targetRoute === "/") {
+        if (window.location.hash) {
+            history.pushState("", document.title, window.location.pathname + window.location.search);
         }
+        render();
+    } else {
+        window.location.hash = targetRoute;
+        render();
     }
 
 });
